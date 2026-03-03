@@ -7,6 +7,7 @@
 #include "cairo.h"
 #include "pool-buffer.h"
 #include "seat.h"
+#include "wlr-screencopy-unstable-v1-client-protocol.h"
 
 // Indicator state: status of authentication attempt
 enum auth_state {
@@ -115,6 +116,7 @@ struct swaylock_state {
 	bool run_display, locked;
 	struct ext_session_lock_manager_v1 *ext_session_lock_manager_v1;
 	struct ext_session_lock_v1 *ext_session_lock_v1;
+	struct zwlr_screencopy_manager_v1 *screencopy_manager;
 };
 
 struct swaylock_surface {
@@ -129,6 +131,8 @@ struct swaylock_surface {
 	struct pool_buffer indicator_buffers[2];
 	bool created;
 	bool dirty;
+	bool fade_started;
+	struct timespec fade_start_time;
 	uint32_t width, height;
 	int32_t scale;
 	enum wl_output_subpixel subpixel;
@@ -137,6 +141,9 @@ struct swaylock_surface {
 	struct wl_callback *frame;
 	// Dimensions of last wl_buffer committed to background surface
 	int last_buffer_width, last_buffer_height;
+	struct zwlr_screencopy_frame_v1 *screencopy_frame;
+	struct pool_buffer screencopy_buffer;
+	bool screencopy_done;
 };
 
 // There is exactly one swaylock_image for each -i argument

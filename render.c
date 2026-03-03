@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdlib.h>
+#include <time.h>
 #include <stdio.h>
 #include <wayland-client.h>
 #include "cairo.h"
@@ -85,8 +86,25 @@ void render(struct swaylock_surface *surface) {
 		cairo_paint(cairo);
 		if (surface->image && state->args.mode != BACKGROUND_MODE_SOLID_COLOR) {
 			cairo_set_operator(cairo, CAIRO_OPERATOR_OVER);
+			double alpha = 1.0;
+			if (state->args.effect_fade_in) {
+				if (!surface->fade_started) {
+					clock_gettime(CLOCK_MONOTONIC, &surface->fade_start_time);
+					surface->fade_started = true;
+				}
+				struct timespec now;
+				clock_gettime(CLOCK_MONOTONIC, &now);
+				long elapsed_ms = (now.tv_sec - surface->fade_start_time.tv_sec) * 1000 +
+								  (now.tv_nsec - surface->fade_start_time.tv_nsec) / 1000000;
+				alpha = (double)elapsed_ms / state->args.effect_fade_in_ms;
+				if (alpha >= 1.0) {
+					alpha = 1.0;
+				} else {
+					surface->dirty = true;
+				}
+			}
 			render_background_image(cairo, surface->image,
-				state->args.mode, buffer_width, buffer_height);
+				state->args.mode, buffer_width, buffer_height, alpha);
 		}
 		cairo_restore(cairo);
 		cairo_identity_matrix(cairo);

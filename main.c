@@ -24,6 +24,7 @@
 #include "pool-buffer.h"
 #include "seat.h"
 #include "swaylock.h"
+#include "effects.h"
 #include "ext-session-lock-v1-client-protocol.h"
 
 static uint32_t parse_color(const char *color) {
@@ -263,6 +264,9 @@ static void handle_global(void *data, struct wl_registry *registry,
 	} else if (strcmp(interface, wl_shm_interface.name) == 0) {
 		state->shm = wl_registry_bind(registry, name,
 				&wl_shm_interface, 1);
+	} else if (strcmp(interface, zwlr_screencopy_manager_v1_interface.name) == 0) {
+		state->screencopy_manager = wl_registry_bind(registry, name,
+				&zwlr_screencopy_manager_v1_interface, 1);
 	} else if (strcmp(interface, wl_seat_interface.name) == 0) {
 		struct wl_seat *seat = wl_registry_bind(
 				registry, name, &wl_seat_interface, 4);
@@ -1120,6 +1124,58 @@ static void display_in(int fd, short mask, void *data) {
 	}
 }
 
+static void handle_screencopy_buffer(void *data,
+		struct zwlr_screencopy_frame_v1 *frame, uint32_t format,
+		uint32_t width, uint32_t height, uint32_t stride) {
+	struct swaylock_surface *surface = data;
+	create_buffer(surface->state->shm, &surface->screencopy_buffer, width, height, format);
+	zwlr_screencopy_frame_v1_copy(frame, surface->screencopy_buffer.buffer);
+}
+
+static void handle_screencopy_flags(void *data,
+		struct zwlr_screencopy_frame_v1 *frame, uint32_t flags) {
+}
+
+static void handle_screencopy_ready(void *data,
+		struct zwlr_screencopy_frame_v1 *frame, uint32_t tv_sec_hi,
+		uint32_t tv_sec_lo, uint32_t tv_nsec) {
+	struct swaylock_surface *surface = data;
+	surface->screencopy_done = true;
+
+	cairo_surface_t *img = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+		surface->screencopy_buffer.width, surface->screencopy_buffer.height);
+	cairo_t *c = cairo_create(img);
+	cairo_set_source_surface(c, surface->screencopy_buffer.surface, 0, 0);
+	cairo_paint(c);
+	cairo_destroy(c);
+
+	if (surface->state->args.effect_blur) {
+		apply_blur(img, surface->state->args.effect_blur_radius);
+	}
+	if (surface->state->args.effect_pixelate) {
+		apply_pixelate(img, surface->state->args.effect_pixelate_block);
+	}
+
+	destroy_buffer(&surface->screencopy_buffer);
+
+	if (surface->image) cairo_surface_destroy(surface->image);
+	surface->image = img;
+}
+
+static void handle_screencopy_failed(void *data,
+		struct zwlr_screencopy_frame_v1 *frame) {
+	struct swaylock_surface *surface = data;
+	surface->screencopy_done = true;
+	swaylock_log(LOG_ERROR, "Screencopy failed");
+}
+
+static const struct zwlr_screencopy_frame_v1_listener screencopy_frame_listener = {
+	.buffer = handle_screencopy_buffer,
+	.flags = handle_screencopy_flags,
+	.ready = handle_screencopy_ready,
+	.failed = handle_screencopy_failed,
+};
+
 static void comm_in(int fd, short mask, void *data) {
 	if (mask & POLLIN) {
 		bool auth_success = false;
@@ -1322,6 +1378,34 @@ int main(int argc, char **argv) {
 	struct swaylock_surface *surface;
 	wl_list_for_each(surface, &state.surfaces, link) {
 		create_surface(surface);
+	}
+
+	if (state.args.screenshots && state.screencopy_manager) {
+		wl_list_for_each(surface, &state.surfaces, link) {
+			surface->screencopy_done = false;
+			surface->screencopy_frame = zwlr_screencopy_manager_v1_capture_output(
+					state.screencopy_manager, 0, surface->output);
+			zwlr_screencopy_frame_v1_add_listener(surface->screencopy_frame,
+					&screencopy_frame_listener, surface);
+		}
+
+		bool all_done = false;
+		while (!all_done) {
+			if (wl_display_dispatch(state.display) < 0) {
+				break;
+			}
+			all_done = true;
+			wl_list_for_each(surface, &state.surfaces, link) {
+				if (!surface->screencopy_done) {
+					all_done = false;
+					break;
+				}
+			}
+		}
+
+		wl_list_for_each(surface, &state.surfaces, link) {
+			zwlr_screencopy_frame_v1_destroy(surface->screencopy_frame);
+		}
 	}
 
 	while (!state.locked) {
