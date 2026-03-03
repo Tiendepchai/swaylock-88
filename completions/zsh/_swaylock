@@ -56,4 +56,16 @@ _arguments -s \
 	'(--text-ver-color)'--text-ver-color'[Sets the color of the text when verifying]:color:' \
 	'(--text-wrong-color)'--text-wrong-color'[Sets the color of the text when invalid]:color:' \
 	'(--tiling -t)'{--tiling,-t}'[Same as --scaling=tile]' \
-	'(--version -v)'{--version,-v}'[Show the version number and quit]'
+	'(--version -v)'{--version,-v}'[Show the version number and quit]' \
+	'(--battery)'--battery'[Display the current battery percentage and charging status]' \
+	'(--clock)'--clock'[Display a clock with the current time and date]' \
+	'(--timestr)'--timestr'[Format string for the time widget]:format:' \
+	'(--datestr)'--datestr'[Format string for the date widget]:format:' \
+	'(--effect-blur)'--effect-blur'[Apply a box blur approximation to the background]:radius:' \
+	'(--effect-fade-in)'--effect-fade-in'[Fade in the background image over the given duration]:ms:' \
+	'(--effect-pixelate)'--effect-pixelate'[Pixelate the background image]:factor:' \
+	'(--indicator-anim)'--indicator-anim'[Sets the animation style for the indicator]:mode:(none pulse spin pulse+spin)' \
+	'(--indicator-anim-duration)'--indicator-anim-duration'[Sets the duration of the indicator animation in milliseconds]:ms:' \
+	'(--indicator-anim-intensity)'--indicator-anim-intensity'[Sets the intensity of the indicator animation]:value:' \
+	'(--screenshots -S)'{--screenshots,-S}'[Use screenshots of the current outputs as the background image]' \
+	'(--show-user)'--show-user'[Display the current username]'

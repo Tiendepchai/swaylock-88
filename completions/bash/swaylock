@@ -21,6 +21,7 @@ _swaylock()
     -n
     -r
     -s
+    -S
     -t
     -u
     -v
@@ -80,6 +81,18 @@ _swaylock()
     --text-wrong-color
     --tiling
     --version
+    --battery
+    --clock
+    --timestr
+    --datestr
+    --effect-blur
+    --effect-fade-in
+    --effect-pixelate
+    --indicator-anim
+    --indicator-anim-duration
+    --indicator-anim-intensity
+    --screenshots
+    --show-user
   )
 
   scaling=(

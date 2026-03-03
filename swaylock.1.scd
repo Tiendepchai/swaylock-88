@@ -65,6 +65,21 @@ Locks your Wayland session.
 	a background color. If the path potentially contains a ':', prefix it with another
 	':' to prevent interpreting part of it as <output>.
 
+*-S, --screenshots*
+	Use screenshots of the current outputs as the background image.
+
+*--effect-blur* <radius>
+	Apply a box blur approximation of a Gaussian blur to the background image.
+	radius is the size of the blur. 0 disables the effect.
+
+*--effect-pixelate* <factor>
+	Pixelate the background image by downscaling and upscaling.
+	factor is the pixelation block size. 0 disables the effect.
+
+*--effect-fade-in* <ms>
+	Fade in the background image over the given duration in milliseconds.
+	0 disables the effect.
+
 *-k, --show-keyboard-layout*
 	Display the current xkb layout while typing.
 
@@ -108,6 +123,16 @@ Locks your Wayland session.
 
 *--indicator-idle-visible*
 	Sets the indicator to show even if idle.
+
+*--indicator-anim* <none|pulse|spin|pulse+spin>
+	Sets the animation style for the indicator. Pulse triggers on keypress,
+	spin triggers while typing/verifying.
+
+*--indicator-anim-duration* <ms>
+	Sets the duration of the indicator animation in milliseconds.
+
+*--indicator-anim-intensity* <value>
+	Sets the intensity of the indicator animation. Expects a float (e.g., 0.5).
 
 *--indicator-radius* <radius>
 	Sets the indicator radius. The default value is 50.
@@ -202,6 +227,23 @@ Locks your Wayland session.
 
 *--text-wrong-color* <rrggbb[aa]>
 	Sets the color of the text when invalid.
+
+# WIDGETS
+
+*--battery*
+	Display the current battery percentage and charging status on the screen.
+
+*--clock*
+	Display a clock with the current time and date on the screen.
+
+*--timestr* <format>
+	Format string for the time widget. Default is "%H:%M:%S".
+
+*--datestr* <format>
+	Format string for the date widget. Default is "%Y-%m-%d".
+
+*--show-user*
+	Display the current username on the screen.
 
 # SIGNALS
 
