@@ -483,6 +483,18 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		LO_TEXT_CAPS_LOCK_COLOR,
 		LO_TEXT_VER_COLOR,
 		LO_TEXT_WRONG_COLOR,
+		LO_SCREENSHOTS,
+		LO_EFFECT_BLUR,
+		LO_EFFECT_PIXELATE,
+		LO_EFFECT_FADE_IN,
+		LO_CLOCK,
+		LO_TIMESTR,
+		LO_DATESTR,
+		LO_BATTERY,
+		LO_SHOW_USER,
+		LO_INDICATOR_ANIM,
+		LO_INDICATOR_ANIM_DURATION,
+		LO_INDICATOR_ANIM_INTENSITY,
 	};
 
 	static struct option long_options[] = {
@@ -540,6 +552,18 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		{"text-caps-lock-color", required_argument, NULL, LO_TEXT_CAPS_LOCK_COLOR},
 		{"text-ver-color", required_argument, NULL, LO_TEXT_VER_COLOR},
 		{"text-wrong-color", required_argument, NULL, LO_TEXT_WRONG_COLOR},
+		{"screenshots", no_argument, NULL, LO_SCREENSHOTS},
+		{"effect-blur", required_argument, NULL, LO_EFFECT_BLUR},
+		{"effect-pixelate", required_argument, NULL, LO_EFFECT_PIXELATE},
+		{"effect-fade-in", required_argument, NULL, LO_EFFECT_FADE_IN},
+		{"clock", no_argument, NULL, LO_CLOCK},
+		{"timestr", required_argument, NULL, LO_TIMESTR},
+		{"datestr", required_argument, NULL, LO_DATESTR},
+		{"battery", no_argument, NULL, LO_BATTERY},
+		{"show-user", no_argument, NULL, LO_SHOW_USER},
+		{"indicator-anim", required_argument, NULL, LO_INDICATOR_ANIM},
+		{"indicator-anim-duration", required_argument, NULL, LO_INDICATOR_ANIM_DURATION},
+		{"indicator-anim-intensity", required_argument, NULL, LO_INDICATOR_ANIM_INTENSITY},
 		{0, 0, 0, 0}
 	};
 
@@ -943,6 +967,66 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 				state->args.colors.text.wrong = parse_color(optarg);
 			}
 			break;
+		case LO_SCREENSHOTS:
+			if (state) state->args.screenshots = true;
+			break;
+		case LO_EFFECT_BLUR:
+			if (state) {
+				state->args.effect_blur = true;
+				state->args.effect_blur_radius = strtoul(optarg, NULL, 0);
+			}
+			break;
+		case LO_EFFECT_PIXELATE:
+			if (state) {
+				state->args.effect_pixelate = true;
+				state->args.effect_pixelate_block = strtoul(optarg, NULL, 0);
+			}
+			break;
+		case LO_EFFECT_FADE_IN:
+			if (state) {
+				state->args.effect_fade_in = true;
+				state->args.effect_fade_in_ms = strtoul(optarg, NULL, 0);
+			}
+			break;
+		case LO_CLOCK:
+			if (state) state->args.clock = true;
+			break;
+		case LO_TIMESTR:
+			if (state) {
+				free(state->args.timestr);
+				state->args.timestr = strdup(optarg);
+			}
+			break;
+		case LO_DATESTR:
+			if (state) {
+				free(state->args.datestr);
+				state->args.datestr = strdup(optarg);
+			}
+			break;
+		case LO_BATTERY:
+			if (state) state->args.battery = true;
+			break;
+		case LO_SHOW_USER:
+			if (state) state->args.show_user = true;
+			break;
+		case LO_INDICATOR_ANIM:
+			if (state) {
+				if (strcmp(optarg, "none") == 0) state->args.indicator_anim = 0;
+				else if (strcmp(optarg, "pulse") == 0) state->args.indicator_anim = 1;
+				else if (strcmp(optarg, "spin") == 0) state->args.indicator_anim = 2;
+				else if (strcmp(optarg, "pulse+spin") == 0) state->args.indicator_anim = 3;
+				else {
+					fprintf(stderr, "Invalid indicator anim: %s\\n", optarg);
+					return 1;
+				}
+			}
+			break;
+		case LO_INDICATOR_ANIM_DURATION:
+			if (state) state->args.indicator_anim_duration = strtoul(optarg, NULL, 0);
+			break;
+		case LO_INDICATOR_ANIM_INTENSITY:
+			if (state) state->args.indicator_anim_intensity = strtod(optarg, NULL);
+			break;
 		default:
 			fprintf(stderr, "%s", usage);
 			return 1;
@@ -1113,6 +1197,21 @@ int main(int argc, char **argv) {
 		.show_failed_attempts = false,
 		.indicator_idle_visible = false,
 		.ready_fd = -1,
+		.screenshots = false,
+		.effect_blur = false,
+		.effect_blur_radius = 5,
+		.effect_pixelate = false,
+		.effect_pixelate_block = 10,
+		.effect_fade_in = false,
+		.effect_fade_in_ms = 1000,
+		.clock = false,
+		.timestr = strdup("%H:%M"),
+		.datestr = strdup("%a, %d/%m/%Y"),
+		.battery = false,
+		.show_user = false,
+		.indicator_anim = 0,
+		.indicator_anim_duration = 500,
+		.indicator_anim_intensity = 0.5,
 	};
 	wl_list_init(&state.images);
 	set_default_colors(&state.args.colors);

@@ -69,6 +69,21 @@ struct swaylock_args {
 	bool daemonize;
 	int ready_fd;
 	bool indicator_idle_visible;
+	bool screenshots;
+	bool effect_blur;
+	uint32_t effect_blur_radius;
+	bool effect_pixelate;
+	uint32_t effect_pixelate_block;
+	bool effect_fade_in;
+	uint32_t effect_fade_in_ms;
+	bool clock;
+	char *timestr;
+	char *datestr;
+	bool battery;
+	bool show_user;
+	int indicator_anim; // 0=none, 1=pulse, 2=spin, 3=pulse+spin
+	uint32_t indicator_anim_duration;
+	double indicator_anim_intensity;
 };
 
 struct swaylock_password {
