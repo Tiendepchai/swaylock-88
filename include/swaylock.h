@@ -133,6 +133,10 @@ struct swaylock_surface {
 	bool dirty;
 	bool fade_started;
 	struct timespec fade_start_time;
+	
+	double indicator_angle;
+	double indicator_velocity;
+	struct timespec last_anim_update;
 	uint32_t width, height;
 	int32_t scale;
 	enum wl_output_subpixel subpixel;

@@ -65,6 +65,8 @@ void render(struct swaylock_surface *surface) {
 		return;
 	}
 
+	surface->dirty = false; // will be set back to true if animations are ongoing
+
 	bool need_destroy = false;
 	struct pool_buffer buffer;
 
@@ -124,8 +126,10 @@ void render(struct swaylock_surface *surface) {
 	// It is possible for the surface scale to change even if the wl_buffer size hasn't
 	wl_surface_set_buffer_scale(surface->surface, surface->scale);
 
-	render_frame(surface);
-	surface->dirty = false;
+	bool is_animating = render_frame(surface);
+	if (is_animating) {
+		surface->dirty = true;
+	}
 	surface->frame = wl_surface_frame(surface->surface);
 	wl_callback_add_listener(surface->frame, &surface_frame_listener, surface);
 	wl_surface_commit(surface->surface);
@@ -212,6 +216,56 @@ static bool render_frame(struct swaylock_surface *surface) {
 	// Compute the size of the buffer needed
 	int arc_radius = state->args.radius * surface->scale;
 	int arc_thickness = state->args.thickness * surface->scale;
+
+	// Animation setup
+	bool is_animating = false;
+	double anim_scale = 1.0;
+	double anim_rotation = 0.0;
+	if (state->args.indicator_anim != 0) {
+		struct timespec now;
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		double ms = (now.tv_sec * 1000.0) + (now.tv_nsec / 1000000.0);
+		double progress = fmod(ms, state->args.indicator_anim_duration) / state->args.indicator_anim_duration;
+
+		if (surface->last_anim_update.tv_sec == 0) {
+			surface->last_anim_update = now;
+		}
+		double dt = (now.tv_sec - surface->last_anim_update.tv_sec) + 
+					(now.tv_nsec - surface->last_anim_update.tv_nsec) / 1e9;
+		surface->last_anim_update = now;
+		if (dt > 1.0) dt = 1.0;
+
+		bool should_spin = draw_indicator && (state->auth_state == AUTH_STATE_VALIDATING || state->input_state != INPUT_STATE_IDLE);
+		double max_vel = (2.0 * M_PI * 1000.0 / state->args.indicator_anim_duration);
+		double target_vel = should_spin ? max_vel : 0.0;
+		
+		double accel = 15.0 * dt;
+		if (surface->indicator_velocity < target_vel) {
+			surface->indicator_velocity += accel;
+			if (surface->indicator_velocity > target_vel) surface->indicator_velocity = target_vel;
+		} else if (surface->indicator_velocity > target_vel) {
+			surface->indicator_velocity -= accel;
+			if (surface->indicator_velocity < target_vel) surface->indicator_velocity = target_vel;
+		}
+
+		surface->indicator_angle += surface->indicator_velocity * dt;
+		
+		if (surface->indicator_velocity > 0.001 || should_spin) {
+			is_animating = true;
+		}
+
+		if (state->args.indicator_anim == 1 || state->args.indicator_anim == 3) { // pulse
+			double pulse = sin(progress * 2 * M_PI);
+			double intensity = state->args.indicator_anim_intensity;
+			if (max_vel > 0.001) intensity *= (surface->indicator_velocity / max_vel);
+			anim_scale = 1.0 + (pulse * 0.1 * intensity);
+			arc_radius *= anim_scale;
+			arc_thickness *= anim_scale;
+		}
+		if (state->args.indicator_anim == 2 || state->args.indicator_anim == 3) { // spin
+			anim_rotation = surface->indicator_angle;
+		}
+	}
 	int buffer_diameter = (arc_radius + arc_thickness) * 2;
 	int buffer_width = buffer_diameter;
 	int buffer_height = buffer_diameter;
@@ -323,7 +377,7 @@ static bool render_frame(struct swaylock_surface *surface) {
 		// Typing indicator: Highlight random part on keypress
 		if (state->input_state == INPUT_STATE_LETTER ||
 				state->input_state == INPUT_STATE_BACKSPACE) {
-			double highlight_start = state->highlight_start * (M_PI / 1024.0);
+			double highlight_start = state->highlight_start * (M_PI / 1024.0) + anim_rotation;
 			cairo_arc(cairo, buffer_width / 2, buffer_diameter / 2,
 					arc_radius, highlight_start,
 					highlight_start + TYPE_INDICATOR_RANGE);
@@ -419,5 +473,5 @@ static bool render_frame(struct swaylock_surface *surface) {
 	wl_surface_damage_buffer(surface->child, 0, 0, INT32_MAX, INT32_MAX);
 	wl_surface_commit(surface->child);
 
-	return true;
+	return is_animating;
 }
