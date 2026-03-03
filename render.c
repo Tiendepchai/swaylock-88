@@ -7,6 +7,7 @@
 #include "background-image.h"
 #include "swaylock.h"
 #include "log.h"
+#include "widgets.h"
 
 #define M_PI 3.14159265358979323846
 const float TYPE_INDICATOR_RANGE = M_PI / 3.0f;
@@ -106,6 +107,9 @@ void render(struct swaylock_surface *surface) {
 			render_background_image(cairo, surface->image,
 				state->args.mode, buffer_width, buffer_height, alpha);
 		}
+		
+		render_widgets(cairo, surface, buffer_width, buffer_height);
+
 		cairo_restore(cairo);
 		cairo_identity_matrix(cairo);
 

@@ -1176,6 +1176,20 @@ static const struct zwlr_screencopy_frame_v1_listener screencopy_frame_listener 
 	.failed = handle_screencopy_failed,
 };
 
+static void time_timer_callback(void *data) {
+	struct swaylock_state *state = data;
+	struct swaylock_surface *surface;
+	wl_list_for_each(surface, &state->surfaces, link) {
+		surface->dirty = true;
+		render(surface);
+	}
+	struct timespec now;
+	clock_gettime(CLOCK_REALTIME, &now);
+	int ms_to_next = 1000 - (now.tv_nsec / 1000000);
+	if (ms_to_next < 10) ms_to_next = 1000;
+	loop_add_timer(state->eventloop, ms_to_next, time_timer_callback, state);
+}
+
 static void comm_in(int fd, short mask, void *data) {
 	if (mask & POLLIN) {
 		bool auth_success = false;
@@ -1439,6 +1453,10 @@ int main(int argc, char **argv) {
 	sigemptyset(&sa.sa_mask);
 	sa.sa_flags = SA_RESTART;
 	sigaction(SIGUSR1, &sa, NULL);
+
+	if (state.args.clock || state.args.battery) {
+		time_timer_callback(&state);
+	}
 
 	state.run_display = true;
 	while (state.run_display) {
