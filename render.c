@@ -67,20 +67,20 @@ void render(struct swaylock_surface *surface) {
 
   surface->dirty = false; // will be set back to true if animations are ongoing
 
-  bool need_destroy = false;
-  struct pool_buffer buffer;
+  struct pool_buffer *buffer = NULL;
 
   if (buffer_width != surface->last_buffer_width ||
-      buffer_height != surface->last_buffer_height) {
-    need_destroy = true;
-    if (!create_buffer(state->shm, &buffer, buffer_width, buffer_height,
-                       WL_SHM_FORMAT_ARGB8888)) {
+      buffer_height != surface->last_buffer_height || surface->bg_dirty) {
+    surface->bg_dirty = false;
+    buffer = get_next_buffer(state->shm, surface->background_buffers,
+                             buffer_width, buffer_height);
+    if (!buffer) {
       swaylock_log(LOG_ERROR,
-                   "Failed to create new buffer for frame background.");
+                   "Failed to get next buffer for frame background.");
       return;
     }
 
-    cairo_t *cairo = buffer.cairo;
+    cairo_t *cairo = buffer->cairo;
     cairo_set_antialias(cairo, CAIRO_ANTIALIAS_BEST);
 
     cairo_save(cairo);
@@ -104,6 +104,7 @@ void render(struct swaylock_surface *surface) {
         if (alpha >= 1.0) {
           alpha = 1.0;
         } else {
+          surface->bg_dirty = true;
           surface->dirty = true;
         }
       }
@@ -116,9 +117,8 @@ void render(struct swaylock_surface *surface) {
     cairo_restore(cairo);
     cairo_identity_matrix(cairo);
 
-    wl_surface_attach(surface->surface, buffer.buffer, 0, 0);
+    wl_surface_attach(surface->surface, buffer->buffer, 0, 0);
     wl_surface_damage_buffer(surface->surface, 0, 0, INT32_MAX, INT32_MAX);
-    need_destroy = true;
 
     surface->last_buffer_width = buffer_width;
     surface->last_buffer_height = buffer_height;
@@ -135,10 +135,6 @@ void render(struct swaylock_surface *surface) {
   surface->frame = wl_surface_frame(surface->surface);
   wl_callback_add_listener(surface->frame, &surface_frame_listener, surface);
   wl_surface_commit(surface->surface);
-
-  if (need_destroy) {
-    destroy_buffer(&buffer);
-  }
 }
 
 static void configure_font_drawing(cairo_t *cairo, struct swaylock_state *state,
@@ -283,6 +279,9 @@ static bool render_frame(struct swaylock_surface *surface) {
     }
   }
   int buffer_diameter = (arc_radius + arc_thickness) * 2;
+  if (state->args.indicator_anim == 4) {
+    buffer_diameter = (arc_radius * 1.5 + arc_thickness) * 2.5;
+  }
   int buffer_width = buffer_diameter;
   int buffer_height = buffer_diameter;
 
@@ -387,6 +386,36 @@ static bool render_frame(struct swaylock_surface *surface) {
       cairo_show_text(cairo, text);
       cairo_close_path(cairo);
       cairo_new_sub_path(cairo);
+    }
+
+    // Draw ripples
+    if (state->args.indicator_anim == 4) {
+      struct timespec now;
+      clock_gettime(CLOCK_MONOTONIC, &now);
+      for (int i = 0; i < MAX_RIPPLES; ++i) {
+        if (state->ripples[i].time.tv_sec == 0)
+          continue;
+        double dt = (now.tv_sec - state->ripples[i].time.tv_sec) +
+                    (now.tv_nsec - state->ripples[i].time.tv_nsec) / 1e9;
+        if (dt >= 0.0 && dt < 1.0) {
+          double ripple_scale = 1.0 + dt * 0.5; // Expands by 50%
+          double alpha = 1.0 - pow(dt, 0.5);    // Fast initial fade
+          uint32_t color = state->ripples[i].color;
+
+          double r = ((color >> 24) & 0xff) / 255.0;
+          double g = ((color >> 16) & 0xff) / 255.0;
+          double b = ((color >> 8) & 0xff) / 255.0;
+          double a = ((color & 0xff) / 255.0) * alpha;
+
+          cairo_set_source_rgba(cairo, r, g, b, a);
+          cairo_set_line_width(cairo, arc_thickness * (1.0 - dt));
+          cairo_arc(cairo, buffer_width / 2, buffer_diameter / 2,
+                    arc_radius * ripple_scale, 0, 2 * M_PI);
+          cairo_stroke(cairo);
+
+          is_animating = true;
+        }
+      }
     }
 
     // Typing indicator: Highlight random part on keypress
