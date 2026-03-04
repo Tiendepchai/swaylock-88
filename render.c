@@ -1,477 +1,518 @@
+#include "background-image.h"
+#include "cairo.h"
+#include "log.h"
+#include "swaylock.h"
+#include "widgets.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include <stdio.h>
 #include <wayland-client.h>
-#include "cairo.h"
-#include "background-image.h"
-#include "swaylock.h"
-#include "log.h"
-#include "widgets.h"
 
 #define M_PI 3.14159265358979323846
 const float TYPE_INDICATOR_RANGE = M_PI / 3.0f;
 
 static void set_color_for_state(cairo_t *cairo, struct swaylock_state *state,
-		struct swaylock_colorset *colorset) {
-	if (state->input_state == INPUT_STATE_CLEAR) {
-		cairo_set_source_u32(cairo, colorset->cleared);
-	} else if (state->auth_state == AUTH_STATE_VALIDATING) {
-		cairo_set_source_u32(cairo, colorset->verifying);
-	} else if (state->auth_state == AUTH_STATE_INVALID) {
-		cairo_set_source_u32(cairo, colorset->wrong);
-	} else {
-		if (state->xkb.caps_lock && state->args.show_caps_lock_indicator) {
-			cairo_set_source_u32(cairo, colorset->caps_lock);
-		} else if (state->xkb.caps_lock && !state->args.show_caps_lock_indicator &&
-				state->args.show_caps_lock_text) {
-			uint32_t inputtextcolor = state->args.colors.text.input;
-			state->args.colors.text.input = state->args.colors.text.caps_lock;
-			cairo_set_source_u32(cairo, colorset->input);
-			state->args.colors.text.input = inputtextcolor;
-		} else {
-			cairo_set_source_u32(cairo, colorset->input);
-		}
-	}
+                                struct swaylock_colorset *colorset) {
+  if (state->input_state == INPUT_STATE_CLEAR) {
+    cairo_set_source_u32(cairo, colorset->cleared);
+  } else if (state->auth_state == AUTH_STATE_VALIDATING) {
+    cairo_set_source_u32(cairo, colorset->verifying);
+  } else if (state->auth_state == AUTH_STATE_INVALID) {
+    cairo_set_source_u32(cairo, colorset->wrong);
+  } else {
+    if (state->xkb.caps_lock && state->args.show_caps_lock_indicator) {
+      cairo_set_source_u32(cairo, colorset->caps_lock);
+    } else if (state->xkb.caps_lock && !state->args.show_caps_lock_indicator &&
+               state->args.show_caps_lock_text) {
+      uint32_t inputtextcolor = state->args.colors.text.input;
+      state->args.colors.text.input = state->args.colors.text.caps_lock;
+      cairo_set_source_u32(cairo, colorset->input);
+      state->args.colors.text.input = inputtextcolor;
+    } else {
+      cairo_set_source_u32(cairo, colorset->input);
+    }
+  }
 }
 
 static void surface_frame_handle_done(void *data, struct wl_callback *callback,
-		uint32_t time) {
-	struct swaylock_surface *surface = data;
+                                      uint32_t time) {
+  struct swaylock_surface *surface = data;
 
-	wl_callback_destroy(callback);
-	surface->frame = NULL;
+  wl_callback_destroy(callback);
+  surface->frame = NULL;
 
-	render(surface);
+  render(surface);
 }
 
 static const struct wl_callback_listener surface_frame_listener = {
-	.done = surface_frame_handle_done,
+    .done = surface_frame_handle_done,
 };
 
 static bool render_frame(struct swaylock_surface *surface);
 
 void render(struct swaylock_surface *surface) {
-	struct swaylock_state *state = surface->state;
+  struct swaylock_state *state = surface->state;
 
-	int buffer_width = surface->width * surface->scale;
-	int buffer_height = surface->height * surface->scale;
-	if (buffer_width == 0 || buffer_height == 0) {
-		return; // not yet configured
-	}
+  int buffer_width = surface->width * surface->scale;
+  int buffer_height = surface->height * surface->scale;
+  if (buffer_width == 0 || buffer_height == 0) {
+    return; // not yet configured
+  }
 
-	if (!surface->dirty || surface->frame) {
-		// Nothing to do or frame already pending
-		return;
-	}
+  if (!surface->dirty || surface->frame) {
+    // Nothing to do or frame already pending
+    return;
+  }
 
-	surface->dirty = false; // will be set back to true if animations are ongoing
+  surface->dirty = false; // will be set back to true if animations are ongoing
 
-	bool need_destroy = false;
-	struct pool_buffer buffer;
+  bool need_destroy = false;
+  struct pool_buffer buffer;
 
-	if (buffer_width != surface->last_buffer_width ||
-			buffer_height != surface->last_buffer_height) {
-		need_destroy = true;
-		if (!create_buffer(state->shm, &buffer, buffer_width, buffer_height,
-				WL_SHM_FORMAT_ARGB8888)) {
-			swaylock_log(LOG_ERROR,
-				"Failed to create new buffer for frame background.");
-			return;
-		}
+  if (buffer_width != surface->last_buffer_width ||
+      buffer_height != surface->last_buffer_height) {
+    need_destroy = true;
+    if (!create_buffer(state->shm, &buffer, buffer_width, buffer_height,
+                       WL_SHM_FORMAT_ARGB8888)) {
+      swaylock_log(LOG_ERROR,
+                   "Failed to create new buffer for frame background.");
+      return;
+    }
 
-		cairo_t *cairo = buffer.cairo;
-		cairo_set_antialias(cairo, CAIRO_ANTIALIAS_BEST);
+    cairo_t *cairo = buffer.cairo;
+    cairo_set_antialias(cairo, CAIRO_ANTIALIAS_BEST);
 
-		cairo_save(cairo);
-		cairo_set_operator(cairo, CAIRO_OPERATOR_SOURCE);
-		cairo_set_source_u32(cairo, state->args.colors.background);
-		cairo_paint(cairo);
-		if (surface->image && state->args.mode != BACKGROUND_MODE_SOLID_COLOR) {
-			cairo_set_operator(cairo, CAIRO_OPERATOR_OVER);
-			double alpha = 1.0;
-			if (state->args.effect_fade_in) {
-				if (!surface->fade_started) {
-					clock_gettime(CLOCK_MONOTONIC, &surface->fade_start_time);
-					surface->fade_started = true;
-				}
-				struct timespec now;
-				clock_gettime(CLOCK_MONOTONIC, &now);
-				long elapsed_ms = (now.tv_sec - surface->fade_start_time.tv_sec) * 1000 +
-								  (now.tv_nsec - surface->fade_start_time.tv_nsec) / 1000000;
-				alpha = (double)elapsed_ms / state->args.effect_fade_in_ms;
-				if (alpha >= 1.0) {
-					alpha = 1.0;
-				} else {
-					surface->dirty = true;
-				}
-			}
-			render_background_image(cairo, surface->image,
-				state->args.mode, buffer_width, buffer_height, alpha);
-		}
-		
-		render_widgets(cairo, surface, buffer_width, buffer_height);
+    cairo_save(cairo);
+    cairo_set_operator(cairo, CAIRO_OPERATOR_SOURCE);
+    cairo_set_source_u32(cairo, state->args.colors.background);
+    cairo_paint(cairo);
+    if (surface->image && state->args.mode != BACKGROUND_MODE_SOLID_COLOR) {
+      cairo_set_operator(cairo, CAIRO_OPERATOR_OVER);
+      double alpha = 1.0;
+      if (state->args.effect_fade_in) {
+        if (!surface->fade_started) {
+          clock_gettime(CLOCK_MONOTONIC, &surface->fade_start_time);
+          surface->fade_started = true;
+        }
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long elapsed_ms =
+            (now.tv_sec - surface->fade_start_time.tv_sec) * 1000 +
+            (now.tv_nsec - surface->fade_start_time.tv_nsec) / 1000000;
+        alpha = (double)elapsed_ms / state->args.effect_fade_in_ms;
+        if (alpha >= 1.0) {
+          alpha = 1.0;
+        } else {
+          surface->dirty = true;
+        }
+      }
+      render_background_image(cairo, surface->image, state->args.mode,
+                              buffer_width, buffer_height, alpha);
+    }
 
-		cairo_restore(cairo);
-		cairo_identity_matrix(cairo);
+    render_widgets(cairo, surface, buffer_width, buffer_height);
 
-		wl_surface_attach(surface->surface, buffer.buffer, 0, 0);
-		wl_surface_damage_buffer(surface->surface, 0, 0, INT32_MAX, INT32_MAX);
-		need_destroy = true;
+    cairo_restore(cairo);
+    cairo_identity_matrix(cairo);
 
-		surface->last_buffer_width = buffer_width;
-		surface->last_buffer_height = buffer_height;
-	}
+    wl_surface_attach(surface->surface, buffer.buffer, 0, 0);
+    wl_surface_damage_buffer(surface->surface, 0, 0, INT32_MAX, INT32_MAX);
+    need_destroy = true;
 
-	// It is possible for the surface scale to change even if the wl_buffer size hasn't
-	wl_surface_set_buffer_scale(surface->surface, surface->scale);
+    surface->last_buffer_width = buffer_width;
+    surface->last_buffer_height = buffer_height;
+  }
 
-	bool is_animating = render_frame(surface);
-	if (is_animating) {
-		surface->dirty = true;
-	}
-	surface->frame = wl_surface_frame(surface->surface);
-	wl_callback_add_listener(surface->frame, &surface_frame_listener, surface);
-	wl_surface_commit(surface->surface);
+  // It is possible for the surface scale to change even if the wl_buffer size
+  // hasn't
+  wl_surface_set_buffer_scale(surface->surface, surface->scale);
 
-	if (need_destroy) {
-		destroy_buffer(&buffer);
-	}
+  bool is_animating = render_frame(surface);
+  if (is_animating) {
+    surface->dirty = true;
+  }
+  surface->frame = wl_surface_frame(surface->surface);
+  wl_callback_add_listener(surface->frame, &surface_frame_listener, surface);
+  wl_surface_commit(surface->surface);
+
+  if (need_destroy) {
+    destroy_buffer(&buffer);
+  }
 }
 
 static void configure_font_drawing(cairo_t *cairo, struct swaylock_state *state,
-		enum wl_output_subpixel subpixel, int arc_radius) {
-	cairo_font_options_t *fo = cairo_font_options_create();
-	cairo_font_options_set_hint_style(fo, CAIRO_HINT_STYLE_FULL);
-	cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_SUBPIXEL);
-	cairo_font_options_set_subpixel_order(fo, to_cairo_subpixel_order(subpixel));
+                                   enum wl_output_subpixel subpixel,
+                                   int arc_radius) {
+  cairo_font_options_t *fo = cairo_font_options_create();
+  cairo_font_options_set_hint_style(fo, CAIRO_HINT_STYLE_FULL);
+  cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_SUBPIXEL);
+  cairo_font_options_set_subpixel_order(fo, to_cairo_subpixel_order(subpixel));
 
-	cairo_set_font_options(cairo, fo);
-	cairo_select_font_face(cairo, state->args.font,
-		CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
-	if (state->args.font_size > 0) {
-		cairo_set_font_size(cairo, state->args.font_size);
-	} else {
-		cairo_set_font_size(cairo, arc_radius / 3.0f);
-	}
-	cairo_font_options_destroy(fo);
+  cairo_set_font_options(cairo, fo);
+  cairo_select_font_face(cairo, state->args.font, CAIRO_FONT_SLANT_NORMAL,
+                         CAIRO_FONT_WEIGHT_NORMAL);
+  if (state->args.font_size > 0) {
+    cairo_set_font_size(cairo, state->args.font_size);
+  } else {
+    cairo_set_font_size(cairo, arc_radius / 3.0f);
+  }
+  cairo_font_options_destroy(fo);
 }
 
 static bool render_frame(struct swaylock_surface *surface) {
-	struct swaylock_state *state = surface->state;
+  struct swaylock_state *state = surface->state;
 
-	// First, compute the text that will be drawn, if any, since this
-	// determines the size/positioning of the surface
+  // First, compute the text that will be drawn, if any, since this
+  // determines the size/positioning of the surface
 
-	char attempts[4]; // like i3lock: count no more than 999
-	char *text = NULL;
-	const char *layout_text = NULL;
+  char attempts[4]; // like i3lock: count no more than 999
+  char *text = NULL;
+  const char *layout_text = NULL;
 
-	bool draw_indicator = state->args.show_indicator &&
-		(state->auth_state != AUTH_STATE_IDLE ||
-			state->input_state != INPUT_STATE_IDLE ||
-			state->args.indicator_idle_visible);
+  bool draw_indicator =
+      state->args.show_indicator && (state->auth_state != AUTH_STATE_IDLE ||
+                                     state->input_state != INPUT_STATE_IDLE ||
+                                     state->args.indicator_idle_visible);
 
-	if (draw_indicator) {
-		if (state->input_state == INPUT_STATE_CLEAR) {
-			// This message has highest priority
-			text = "Cleared";
-		} else if (state->auth_state == AUTH_STATE_VALIDATING) {
-			text = "Verifying";
-		} else if (state->auth_state == AUTH_STATE_INVALID) {
-			text = "Wrong";
-		} else {
-			// Caps Lock has higher priority
-			if (state->xkb.caps_lock && state->args.show_caps_lock_text) {
-				text = "Caps Lock";
-			} else if (state->args.show_failed_attempts &&
-					state->failed_attempts > 0) {
-				if (state->failed_attempts > 999) {
-					text = "999+";
-				} else {
-					snprintf(attempts, sizeof(attempts), "%d", state->failed_attempts);
-					text = attempts;
-				}
-			}
+  if (draw_indicator) {
+    if (state->input_state == INPUT_STATE_CLEAR) {
+      // This message has highest priority
+      text = "Cleared";
+    } else if (state->auth_state == AUTH_STATE_VALIDATING) {
+      text = "Verifying";
+    } else if (state->auth_state == AUTH_STATE_INVALID) {
+      text = "Wrong";
+    } else {
+      // Caps Lock has higher priority
+      if (state->xkb.caps_lock && state->args.show_caps_lock_text) {
+        text = "Caps Lock";
+      } else if (state->args.show_failed_attempts &&
+                 state->failed_attempts > 0) {
+        if (state->failed_attempts > 999) {
+          text = "999+";
+        } else {
+          snprintf(attempts, sizeof(attempts), "%d", state->failed_attempts);
+          text = attempts;
+        }
+      }
 
-			if (state->xkb.keymap) {
-				xkb_layout_index_t num_layout = xkb_keymap_num_layouts(state->xkb.keymap);
-				if (!state->args.hide_keyboard_layout &&
-						(state->args.show_keyboard_layout || num_layout > 1)) {
-					xkb_layout_index_t curr_layout = 0;
+      if (state->xkb.keymap) {
+        xkb_layout_index_t num_layout =
+            xkb_keymap_num_layouts(state->xkb.keymap);
+        if (!state->args.hide_keyboard_layout &&
+            (state->args.show_keyboard_layout || num_layout > 1)) {
+          xkb_layout_index_t curr_layout = 0;
 
-					// advance to the first active layout (if any)
-					while (curr_layout < num_layout &&
-						xkb_state_layout_index_is_active(state->xkb.state,
-							curr_layout, XKB_STATE_LAYOUT_EFFECTIVE) != 1) {
-						++curr_layout;
-					}
-					// will handle invalid index if none are active
-					layout_text = xkb_keymap_layout_get_name(state->xkb.keymap, curr_layout);
-				}
-			}
-		}
-	}
+          // advance to the first active layout (if any)
+          while (curr_layout < num_layout &&
+                 xkb_state_layout_index_is_active(state->xkb.state, curr_layout,
+                                                  XKB_STATE_LAYOUT_EFFECTIVE) !=
+                     1) {
+            ++curr_layout;
+          }
+          // will handle invalid index if none are active
+          layout_text =
+              xkb_keymap_layout_get_name(state->xkb.keymap, curr_layout);
+        }
+      }
+    }
+  }
 
-	// Compute the size of the buffer needed
-	int arc_radius = state->args.radius * surface->scale;
-	int arc_thickness = state->args.thickness * surface->scale;
+  // Compute the size of the buffer needed
+  int arc_radius = state->args.radius * surface->scale;
+  int arc_thickness = state->args.thickness * surface->scale;
 
-	// Animation setup
-	bool is_animating = false;
-	double anim_scale = 1.0;
-	double anim_rotation = 0.0;
-	if (state->args.indicator_anim != 0) {
-		struct timespec now;
-		clock_gettime(CLOCK_MONOTONIC, &now);
-		double ms = (now.tv_sec * 1000.0) + (now.tv_nsec / 1000000.0);
-		double progress = fmod(ms, state->args.indicator_anim_duration) / state->args.indicator_anim_duration;
+  // Animation setup
+  bool is_animating = false;
+  double anim_scale = 1.0;
+  double anim_rotation = 0.0;
+  if (state->args.indicator_anim != 0) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    double ms = (now.tv_sec * 1000.0) + (now.tv_nsec / 1000000.0);
+    double progress = fmod(ms, state->args.indicator_anim_duration) /
+                      state->args.indicator_anim_duration;
 
-		if (surface->last_anim_update.tv_sec == 0) {
-			surface->last_anim_update = now;
-		}
-		double dt = (now.tv_sec - surface->last_anim_update.tv_sec) + 
-					(now.tv_nsec - surface->last_anim_update.tv_nsec) / 1e9;
-		surface->last_anim_update = now;
-		if (dt > 1.0) dt = 1.0;
+    if (surface->last_anim_update.tv_sec == 0) {
+      surface->last_anim_update = now;
+    }
+    double dt = (now.tv_sec - surface->last_anim_update.tv_sec) +
+                (now.tv_nsec - surface->last_anim_update.tv_nsec) / 1e9;
+    surface->last_anim_update = now;
+    if (dt > 1.0)
+      dt = 1.0;
 
-		bool should_spin = draw_indicator && (state->auth_state == AUTH_STATE_VALIDATING || state->input_state != INPUT_STATE_IDLE);
-		double max_vel = (2.0 * M_PI * 1000.0 / state->args.indicator_anim_duration);
-		double target_vel = should_spin ? max_vel : 0.0;
-		
-		double accel = 15.0 * dt;
-		if (surface->indicator_velocity < target_vel) {
-			surface->indicator_velocity += accel;
-			if (surface->indicator_velocity > target_vel) surface->indicator_velocity = target_vel;
-		} else if (surface->indicator_velocity > target_vel) {
-			surface->indicator_velocity -= accel;
-			if (surface->indicator_velocity < target_vel) surface->indicator_velocity = target_vel;
-		}
+    bool should_spin =
+        draw_indicator && (state->auth_state == AUTH_STATE_VALIDATING ||
+                           state->input_state != INPUT_STATE_IDLE);
+    double max_vel =
+        (2.0 * M_PI * 1000.0 / state->args.indicator_anim_duration);
+    double target_vel = should_spin ? max_vel : 0.0;
 
-		surface->indicator_angle += surface->indicator_velocity * dt;
-		
-		if (surface->indicator_velocity > 0.001 || should_spin) {
-			is_animating = true;
-		}
+    double accel = 15.0 * dt;
+    if (surface->indicator_velocity < target_vel) {
+      surface->indicator_velocity += accel;
+      if (surface->indicator_velocity > target_vel)
+        surface->indicator_velocity = target_vel;
+    } else if (surface->indicator_velocity > target_vel) {
+      surface->indicator_velocity -= accel;
+      if (surface->indicator_velocity < target_vel)
+        surface->indicator_velocity = target_vel;
+    }
 
-		if (state->args.indicator_anim == 1 || state->args.indicator_anim == 3) { // pulse
-			double pulse = sin(progress * 2 * M_PI);
-			double intensity = state->args.indicator_anim_intensity;
-			if (max_vel > 0.001) intensity *= (surface->indicator_velocity / max_vel);
-			anim_scale = 1.0 + (pulse * 0.1 * intensity);
-			arc_radius *= anim_scale;
-			arc_thickness *= anim_scale;
-		}
-		if (state->args.indicator_anim == 2 || state->args.indicator_anim == 3) { // spin
-			anim_rotation = surface->indicator_angle;
-		}
-	}
-	int buffer_diameter = (arc_radius + arc_thickness) * 2;
-	int buffer_width = buffer_diameter;
-	int buffer_height = buffer_diameter;
+    surface->indicator_angle += surface->indicator_velocity * dt;
 
-	if (text || layout_text) {
-		cairo_set_antialias(state->test_cairo, CAIRO_ANTIALIAS_BEST);
-		configure_font_drawing(state->test_cairo, state, surface->subpixel, arc_radius);
+    if (surface->indicator_velocity > 0.001 || should_spin) {
+      is_animating = true;
+    }
 
-		if (text) {
-			cairo_text_extents_t extents;
-			cairo_text_extents(state->test_cairo, text, &extents);
-			if (buffer_width < extents.width) {
-				buffer_width = extents.width;
-			}
-		}
-		if (layout_text) {
-			cairo_text_extents_t extents;
-			cairo_font_extents_t fe;
-			double box_padding = 4.0 * surface->scale;
-			cairo_text_extents(state->test_cairo, layout_text, &extents);
-			cairo_font_extents(state->test_cairo, &fe);
-			buffer_height += fe.height + 2 * box_padding;
-			if (buffer_width < extents.width + 2 * box_padding) {
-				buffer_width = extents.width + 2 * box_padding;
-			}
-		}
-	}
-	// Ensure buffer size is multiple of buffer scale - required by protocol
-	buffer_height += surface->scale - (buffer_height % surface->scale);
-	buffer_width += surface->scale - (buffer_width % surface->scale);
+    if (state->args.indicator_anim == 1 ||
+        state->args.indicator_anim == 3) { // pulse
+      double pulse = sin(progress * 2 * M_PI);
+      double intensity = state->args.indicator_anim_intensity;
+      if (max_vel > 0.001)
+        intensity *= (surface->indicator_velocity / max_vel);
+      anim_scale = 1.0 + (pulse * 0.1 * intensity);
+      arc_radius *= anim_scale;
+      arc_thickness *= anim_scale;
+    }
+    if (state->args.indicator_anim == 2 ||
+        state->args.indicator_anim == 3) { // spin
+      anim_rotation = surface->indicator_angle;
+    }
+  }
+  int buffer_diameter = (arc_radius + arc_thickness) * 2;
+  int buffer_width = buffer_diameter;
+  int buffer_height = buffer_diameter;
 
-	int subsurf_xpos;
-	int subsurf_ypos;
+  if (text || layout_text) {
+    cairo_set_antialias(state->test_cairo, CAIRO_ANTIALIAS_BEST);
+    configure_font_drawing(state->test_cairo, state, surface->subpixel,
+                           arc_radius);
 
-	// Center the indicator unless overridden by the user
-	if (state->args.override_indicator_x_position) {
-		subsurf_xpos = state->args.indicator_x_position -
-			buffer_width / (2 * surface->scale) + 2 / surface->scale;
-	} else {
-		subsurf_xpos = surface->width / 2 -
-			buffer_width / (2 * surface->scale) + 2 / surface->scale;
-	}
+    if (text) {
+      cairo_text_extents_t extents;
+      cairo_text_extents(state->test_cairo, text, &extents);
+      if (buffer_width < extents.width) {
+        buffer_width = extents.width;
+      }
+    }
+    if (layout_text) {
+      cairo_text_extents_t extents;
+      cairo_font_extents_t fe;
+      double box_padding = 4.0 * surface->scale;
+      cairo_text_extents(state->test_cairo, layout_text, &extents);
+      cairo_font_extents(state->test_cairo, &fe);
+      buffer_height += fe.height + 2 * box_padding;
+      if (buffer_width < extents.width + 2 * box_padding) {
+        buffer_width = extents.width + 2 * box_padding;
+      }
+    }
+  }
+  // Ensure buffer size is multiple of buffer scale - required by protocol
+  buffer_height += surface->scale - (buffer_height % surface->scale);
+  buffer_width += surface->scale - (buffer_width % surface->scale);
 
-	if (state->args.override_indicator_y_position) {
-		subsurf_ypos = state->args.indicator_y_position -
-			(state->args.radius + state->args.thickness);
-	} else {
-		subsurf_ypos = surface->height / 2 -
-			(state->args.radius + state->args.thickness);
-	}
+  int subsurf_xpos;
+  int subsurf_ypos;
 
-	struct pool_buffer *buffer = get_next_buffer(state->shm,
-			surface->indicator_buffers, buffer_width, buffer_height);
-	if (buffer == NULL) {
-		swaylock_log(LOG_ERROR, "No buffer");
-		return false;
-	}
+  // Center the indicator unless overridden by the user
+  if (state->args.override_indicator_x_position) {
+    subsurf_xpos = state->args.indicator_x_position -
+                   buffer_width / (2 * surface->scale) + 2 / surface->scale;
+  } else {
+    subsurf_xpos = surface->width / 2 - buffer_width / (2 * surface->scale) +
+                   2 / surface->scale;
+  }
 
-	// Render the buffer
-	cairo_t *cairo = buffer->cairo;
-	cairo_set_antialias(cairo, CAIRO_ANTIALIAS_BEST);
+  if (state->args.override_indicator_y_position) {
+    subsurf_ypos = state->args.indicator_y_position -
+                   (state->args.radius + state->args.thickness);
+  } else {
+    subsurf_ypos =
+        surface->height / 2 - (state->args.radius + state->args.thickness);
+  }
 
-	cairo_identity_matrix(cairo);
+  struct pool_buffer *buffer = get_next_buffer(
+      state->shm, surface->indicator_buffers, buffer_width, buffer_height);
+  if (buffer == NULL) {
+    swaylock_log(LOG_ERROR, "No buffer");
+    return false;
+  }
 
-	// Clear
-	cairo_save(cairo);
-	cairo_set_source_rgba(cairo, 0, 0, 0, 0);
-	cairo_set_operator(cairo, CAIRO_OPERATOR_SOURCE);
-	cairo_paint(cairo);
-	cairo_restore(cairo);
+  // Render the buffer
+  cairo_t *cairo = buffer->cairo;
+  cairo_set_antialias(cairo, CAIRO_ANTIALIAS_BEST);
 
-	if (draw_indicator) {
-		// Fill inner circle
-		cairo_set_line_width(cairo, 0);
-		cairo_arc(cairo, buffer_width / 2, buffer_diameter / 2,
-				arc_radius - arc_thickness / 2, 0, 2 * M_PI);
-		set_color_for_state(cairo, state, &state->args.colors.inside);
-		cairo_fill_preserve(cairo);
-		cairo_stroke(cairo);
+  cairo_identity_matrix(cairo);
 
-		// Draw ring
-		cairo_set_line_width(cairo, arc_thickness);
-		cairo_arc(cairo, buffer_width / 2, buffer_diameter / 2, arc_radius,
-				0, 2 * M_PI);
-		set_color_for_state(cairo, state, &state->args.colors.ring);
-		cairo_stroke(cairo);
+  // Clear
+  cairo_save(cairo);
+  cairo_set_source_rgba(cairo, 0, 0, 0, 0);
+  cairo_set_operator(cairo, CAIRO_OPERATOR_SOURCE);
+  cairo_paint(cairo);
+  cairo_restore(cairo);
 
-		// Draw a message
-		configure_font_drawing(cairo, state, surface->subpixel, arc_radius);
-		set_color_for_state(cairo, state, &state->args.colors.text);
+  if (draw_indicator) {
+    // Fill inner circle
+    cairo_set_line_width(cairo, 0);
+    cairo_arc(cairo, buffer_width / 2, buffer_diameter / 2,
+              arc_radius - arc_thickness / 2, 0, 2 * M_PI);
+    set_color_for_state(cairo, state, &state->args.colors.inside);
+    cairo_fill_preserve(cairo);
+    cairo_stroke(cairo);
 
-		if (text) {
-			cairo_text_extents_t extents;
-			cairo_font_extents_t fe;
-			double x, y;
-			cairo_text_extents(cairo, text, &extents);
-			cairo_font_extents(cairo, &fe);
-			x = (buffer_width / 2) -
-				(extents.width / 2 + extents.x_bearing);
-			y = (buffer_diameter / 2) +
-				(fe.height / 2 - fe.descent);
+    // Draw ring
+    cairo_set_line_width(cairo, arc_thickness);
+    cairo_arc(cairo, buffer_width / 2, buffer_diameter / 2, arc_radius, 0,
+              2 * M_PI);
+    set_color_for_state(cairo, state, &state->args.colors.ring);
+    cairo_stroke(cairo);
 
-			cairo_move_to(cairo, x, y);
-			cairo_show_text(cairo, text);
-			cairo_close_path(cairo);
-			cairo_new_sub_path(cairo);
-		}
+    // Draw a message
+    configure_font_drawing(cairo, state, surface->subpixel, arc_radius);
+    set_color_for_state(cairo, state, &state->args.colors.text);
 
-		// Typing indicator: Highlight random part on keypress
-		if (state->input_state == INPUT_STATE_LETTER ||
-				state->input_state == INPUT_STATE_BACKSPACE) {
-			double highlight_start = state->highlight_start * (M_PI / 1024.0) + anim_rotation;
-			cairo_arc(cairo, buffer_width / 2, buffer_diameter / 2,
-					arc_radius, highlight_start,
-					highlight_start + TYPE_INDICATOR_RANGE);
-			if (state->input_state == INPUT_STATE_LETTER) {
-				if (state->xkb.caps_lock && state->args.show_caps_lock_indicator) {
-					cairo_set_source_u32(cairo, state->args.colors.caps_lock_key_highlight);
-				} else {
-					cairo_set_source_u32(cairo, state->args.colors.key_highlight);
-				}
-			} else {
-				if (state->xkb.caps_lock && state->args.show_caps_lock_indicator) {
-					cairo_set_source_u32(cairo, state->args.colors.caps_lock_bs_highlight);
-				} else {
-					cairo_set_source_u32(cairo, state->args.colors.bs_highlight);
-				}
-			}
-			cairo_stroke(cairo);
+    if (text) {
+      cairo_text_extents_t extents;
+      cairo_font_extents_t fe;
+      double x, y;
+      cairo_text_extents(cairo, text, &extents);
+      cairo_font_extents(cairo, &fe);
+      x = (buffer_width / 2) - (extents.width / 2 + extents.x_bearing);
+      y = (buffer_diameter / 2) + (fe.height / 2 - fe.descent);
 
-			// Draw borders
-			double inner_radius = buffer_diameter / 2.0 - arc_thickness * 1.5;
-			double outer_radius = buffer_diameter / 2.0 - arc_thickness / 2.0;
+      cairo_move_to(cairo, x, y);
+      cairo_show_text(cairo, text);
+      cairo_close_path(cairo);
+      cairo_new_sub_path(cairo);
+    }
 
-			cairo_set_line_width(cairo, 2.0 * surface->scale);
-			cairo_set_source_u32(cairo, state->args.colors.separator);
-			cairo_move_to(cairo,
-				buffer_width / 2.0 + cos(highlight_start) * inner_radius,
-				buffer_diameter / 2.0 + sin(highlight_start) * inner_radius
-			);
-			cairo_line_to(cairo,
-				buffer_width / 2.0 + cos(highlight_start) * outer_radius,
-				buffer_diameter / 2.0 + sin(highlight_start) * outer_radius
-			);
-			cairo_stroke(cairo);
+    // Typing indicator: Highlight random part on keypress
+    if (state->input_state == INPUT_STATE_LETTER ||
+        state->input_state == INPUT_STATE_BACKSPACE) {
+      double highlight_start =
+          state->highlight_start * (M_PI / 1024.0) + anim_rotation;
 
-			cairo_move_to(cairo,
-				buffer_width / 2.0 + cos(highlight_start + TYPE_INDICATOR_RANGE) * inner_radius,
-				buffer_diameter / 2.0 + sin(highlight_start + TYPE_INDICATOR_RANGE) * inner_radius
-			);
-			cairo_line_to(cairo,
-				buffer_width / 2.0 + cos(highlight_start + TYPE_INDICATOR_RANGE) * outer_radius,
-				buffer_diameter / 2.0 + sin(highlight_start + TYPE_INDICATOR_RANGE) * outer_radius
-			);
-			cairo_stroke(cairo);
-		}
+      uint32_t color;
+      if (state->input_state == INPUT_STATE_LETTER) {
+        if (state->xkb.caps_lock && state->args.show_caps_lock_indicator) {
+          color = state->args.colors.caps_lock_key_highlight;
+        } else {
+          color = state->args.colors.key_highlight;
+        }
+      } else {
+        if (state->xkb.caps_lock && state->args.show_caps_lock_indicator) {
+          color = state->args.colors.caps_lock_bs_highlight;
+        } else {
+          color = state->args.colors.bs_highlight;
+        }
+      }
 
-		// Draw inner + outer border of the circle
-		set_color_for_state(cairo, state, &state->args.colors.line);
-		cairo_set_line_width(cairo, 2.0 * surface->scale);
-		cairo_arc(cairo, buffer_width / 2, buffer_diameter / 2,
-				arc_radius - arc_thickness / 2, 0, 2 * M_PI);
-		cairo_stroke(cairo);
-		cairo_arc(cairo, buffer_width / 2, buffer_diameter / 2,
-				arc_radius + arc_thickness / 2, 0, 2 * M_PI);
-		cairo_stroke(cairo);
+      if (state->args.indicator_anim == 2 || state->args.indicator_anim == 3) {
+        // Meteor Tail Gradient
+        int steps = 24;
+        double step_size = TYPE_INDICATOR_RANGE / steps;
+        double r = ((color >> 24) & 0xff) / 255.0;
+        double g = ((color >> 16) & 0xff) / 255.0;
+        double b = ((color >> 8) & 0xff) / 255.0;
+        double a = (color & 0xff) / 255.0;
 
-		// display layout text separately
-		if (layout_text) {
-			cairo_text_extents_t extents;
-			cairo_font_extents_t fe;
-			double x, y;
-			double box_padding = 4.0 * surface->scale;
-			cairo_text_extents(cairo, layout_text, &extents);
-			cairo_font_extents(cairo, &fe);
-			// upper left coordinates for box
-			x = (buffer_width / 2) - (extents.width / 2) - box_padding;
-			y = buffer_diameter;
+        for (int i = 0; i < steps; ++i) {
+          // Exponential-like alpha curve for a hot head and smooth tail
+          double alpha_ratio = pow((double)(i + 1) / steps, 1.5);
+          cairo_set_source_rgba(cairo, r, g, b, a * alpha_ratio);
+          cairo_new_sub_path(cairo);
+          cairo_arc(cairo, buffer_width / 2, buffer_diameter / 2, arc_radius,
+                    highlight_start + i * step_size,
+                    highlight_start + (i + 1) * step_size + 0.02);
+          cairo_stroke(cairo);
+        }
+      } else {
+        // Solid block
+        cairo_set_source_u32(cairo, color);
+        cairo_arc(cairo, buffer_width / 2, buffer_diameter / 2, arc_radius,
+                  highlight_start, highlight_start + TYPE_INDICATOR_RANGE);
+        cairo_stroke(cairo);
+      }
 
-			// background box
-			cairo_rectangle(cairo, x, y,
-				extents.width + 2.0 * box_padding,
-				fe.height + 2.0 * box_padding);
-			cairo_set_source_u32(cairo, state->args.colors.layout_background);
-			cairo_fill_preserve(cairo);
-			// border
-			cairo_set_source_u32(cairo, state->args.colors.layout_border);
-			cairo_stroke(cairo);
+      // Draw borders
+      double inner_radius = buffer_diameter / 2.0 - arc_thickness * 1.5;
+      double outer_radius = buffer_diameter / 2.0 - arc_thickness / 2.0;
 
-			// take font extents and padding into account
-			cairo_move_to(cairo,
-				x - extents.x_bearing + box_padding,
-				y + (fe.height - fe.descent) + box_padding);
-			cairo_set_source_u32(cairo, state->args.colors.layout_text);
-			cairo_show_text(cairo, layout_text);
-			cairo_new_sub_path(cairo);
-		}
-	}
+      cairo_set_line_width(cairo, 2.0 * surface->scale);
+      cairo_set_source_u32(cairo, state->args.colors.separator);
+      cairo_move_to(
+          cairo, buffer_width / 2.0 + cos(highlight_start) * inner_radius,
+          buffer_diameter / 2.0 + sin(highlight_start) * inner_radius);
+      cairo_line_to(
+          cairo, buffer_width / 2.0 + cos(highlight_start) * outer_radius,
+          buffer_diameter / 2.0 + sin(highlight_start) * outer_radius);
+      cairo_stroke(cairo);
 
-	// Send Wayland requests
-	wl_subsurface_set_position(surface->subsurface, subsurf_xpos, subsurf_ypos);
+      cairo_move_to(
+          cairo,
+          buffer_width / 2.0 +
+              cos(highlight_start + TYPE_INDICATOR_RANGE) * inner_radius,
+          buffer_diameter / 2.0 +
+              sin(highlight_start + TYPE_INDICATOR_RANGE) * inner_radius);
+      cairo_line_to(
+          cairo,
+          buffer_width / 2.0 +
+              cos(highlight_start + TYPE_INDICATOR_RANGE) * outer_radius,
+          buffer_diameter / 2.0 +
+              sin(highlight_start + TYPE_INDICATOR_RANGE) * outer_radius);
+      cairo_stroke(cairo);
+    }
 
-	wl_surface_set_buffer_scale(surface->child, surface->scale);
-	wl_surface_attach(surface->child, buffer->buffer, 0, 0);
-	wl_surface_damage_buffer(surface->child, 0, 0, INT32_MAX, INT32_MAX);
-	wl_surface_commit(surface->child);
+    // Draw inner + outer border of the circle
+    set_color_for_state(cairo, state, &state->args.colors.line);
+    cairo_set_line_width(cairo, 2.0 * surface->scale);
+    cairo_arc(cairo, buffer_width / 2, buffer_diameter / 2,
+              arc_radius - arc_thickness / 2, 0, 2 * M_PI);
+    cairo_stroke(cairo);
+    cairo_arc(cairo, buffer_width / 2, buffer_diameter / 2,
+              arc_radius + arc_thickness / 2, 0, 2 * M_PI);
+    cairo_stroke(cairo);
 
-	return is_animating;
+    // display layout text separately
+    if (layout_text) {
+      cairo_text_extents_t extents;
+      cairo_font_extents_t fe;
+      double x, y;
+      double box_padding = 4.0 * surface->scale;
+      cairo_text_extents(cairo, layout_text, &extents);
+      cairo_font_extents(cairo, &fe);
+      // upper left coordinates for box
+      x = (buffer_width / 2) - (extents.width / 2) - box_padding;
+      y = buffer_diameter;
+
+      // background box
+      cairo_rectangle(cairo, x, y, extents.width + 2.0 * box_padding,
+                      fe.height + 2.0 * box_padding);
+      cairo_set_source_u32(cairo, state->args.colors.layout_background);
+      cairo_fill_preserve(cairo);
+      // border
+      cairo_set_source_u32(cairo, state->args.colors.layout_border);
+      cairo_stroke(cairo);
+
+      // take font extents and padding into account
+      cairo_move_to(cairo, x - extents.x_bearing + box_padding,
+                    y + (fe.height - fe.descent) + box_padding);
+      cairo_set_source_u32(cairo, state->args.colors.layout_text);
+      cairo_show_text(cairo, layout_text);
+      cairo_new_sub_path(cairo);
+    }
+  }
+
+  // Send Wayland requests
+  wl_subsurface_set_position(surface->subsurface, subsurf_xpos, subsurf_ypos);
+
+  wl_surface_set_buffer_scale(surface->child, surface->scale);
+  wl_surface_attach(surface->child, buffer->buffer, 0, 0);
+  wl_surface_damage_buffer(surface->child, 0, 0, INT32_MAX, INT32_MAX);
+  wl_surface_commit(surface->child);
+
+  return is_animating;
 }
