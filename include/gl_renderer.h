@@ -20,9 +20,18 @@ struct gl_surface_state {
   bool bg_texture_valid;
   int bg_tex_width, bg_tex_height;
 
-  // Font atlas texture
-  GLuint font_texture;
-  bool font_texture_valid;
+  // Font atlas
+  GLuint font_atlas_texture;
+  int atlas_width, atlas_height;
+  bool font_loaded;
+
+  // Glyph metrics for ASCII 32..126
+  struct {
+    float x0, y0, x1, y1; // texture coords
+    float xoff, yoff;     // pixel offset from baseline
+    float xadvance;       // horizontal advance
+    float w, h;           // pixel dimensions
+  } glyphs[128];
 };
 
 // Global OpenGL state (shared across surfaces)
@@ -40,19 +49,6 @@ struct gl_state {
 
   // Shared vertex data
   GLuint quad_vbo;
-
-  // Font atlas
-  GLuint font_atlas_texture;
-  int atlas_width, atlas_height;
-  bool font_loaded;
-
-  // Glyph metrics for ASCII 32..126
-  struct {
-    float x0, y0, x1, y1; // texture coords
-    float xoff, yoff;     // pixel offset from baseline
-    float xadvance;       // horizontal advance
-    float w, h;           // pixel dimensions
-  } glyphs[128];
 };
 
 // Resolve font family name to TTF file path via fontconfig
@@ -75,7 +71,8 @@ void gl_upload_background(struct gl_state *gl, struct gl_surface_state *gls,
                           bool apply_blur, int blur_passes);
 
 // Load a TTF font file and generate SDF atlas
-bool gl_load_font(struct gl_state *gl, const char *font_path, float font_size);
+bool gl_load_font(struct gl_state *gl, struct gl_surface_state *gls,
+                  const char *font_path, float font_size);
 
 // Render the full frame: background blur + text indicator
 void gl_render_frame(struct gl_state *gl, struct gl_surface_state *gls,

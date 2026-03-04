@@ -41,12 +41,14 @@ void render(struct swaylock_surface *surface) {
 
   // ======== OpenGL Rendering Path ========
   if (state->gl.initialized && surface->gl_surface.egl_window) {
-    // Load font once
-    if (!state->gl.font_loaded) {
+    // Load font once per surface
+    if (!surface->gl_surface.font_loaded) {
       char font_path[512];
       const char *family = state->args.font ? state->args.font : "monospace";
       if (gl_resolve_font_path(family, font_path, sizeof(font_path))) {
-        gl_load_font(&state->gl, font_path, 28.0f);
+        float scaled_font_size = 28.0f * (float)surface->scale;
+        gl_load_font(&state->gl, &surface->gl_surface, font_path,
+                     scaled_font_size);
       }
     }
 

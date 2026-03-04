@@ -400,7 +400,8 @@ void gl_upload_background(struct gl_state *gl, struct gl_surface_state *gls,
 // SDF Font Loading (using stb_truetype)
 // ============================================================
 
-bool gl_load_font(struct gl_state *gl, const char *font_path, float font_size) {
+bool gl_load_font(struct gl_state *gl, struct gl_surface_state *gls,
+                  const char *font_path, float font_size) {
   FILE *f = fopen(font_path, "rb");
   if (!f) {
     swaylock_log(LOG_ERROR, "Cannot open font: %s", font_path);
@@ -423,9 +424,9 @@ bool gl_load_font(struct gl_state *gl, const char *font_path, float font_size) {
   fclose(f);
 
   // Generate SDF atlas
-  gl->atlas_width = 512;
-  gl->atlas_height = 512;
-  unsigned char *atlas_bitmap = calloc(gl->atlas_width * gl->atlas_height, 1);
+  gls->atlas_width = 512;
+  gls->atlas_height = 512;
+  unsigned char *atlas_bitmap = calloc(gls->atlas_width * gls->atlas_height, 1);
   if (!atlas_bitmap) {
     free(font_data);
     return false;
@@ -458,12 +459,12 @@ bool gl_load_font(struct gl_state *gl, const char *font_path, float font_size) {
     int sdf_h = gh + pad * 2;
 
     // Line-wrap in atlas
-    if (atlas_x + sdf_w + 1 >= gl->atlas_width) {
+    if (atlas_x + sdf_w + 1 >= gls->atlas_width) {
       atlas_x = 1;
       atlas_y += row_height + 1;
       row_height = 0;
     }
-    if (atlas_y + sdf_h + 1 >= gl->atlas_height) {
+    if (atlas_y + sdf_h + 1 >= gls->atlas_height) {
       swaylock_log(LOG_ERROR, "Font atlas too small");
       break;
     }
@@ -474,7 +475,7 @@ bool gl_load_font(struct gl_state *gl, const char *font_path, float font_size) {
     if (sdf) {
       for (int y = 0; y < sdf_h; y++) {
         for (int x = 0; x < sdf_w; x++) {
-          int dst = (atlas_y + y) * gl->atlas_width + (atlas_x + x);
+          int dst = (atlas_y + y) * gls->atlas_width + (atlas_x + x);
           atlas_bitmap[dst] = sdf[y * sdf_w + x];
         }
       }
@@ -482,18 +483,18 @@ bool gl_load_font(struct gl_state *gl, const char *font_path, float font_size) {
     }
 
     // Store glyph metrics
-    gl->glyphs[ch].x0 = (float)atlas_x / gl->atlas_width;
-    gl->glyphs[ch].y0 = (float)atlas_y / gl->atlas_height;
-    gl->glyphs[ch].x1 = (float)(atlas_x + sdf_w) / gl->atlas_width;
-    gl->glyphs[ch].y1 = (float)(atlas_y + sdf_h) / gl->atlas_height;
-    gl->glyphs[ch].xoff = (float)ix0 - pad;
-    gl->glyphs[ch].yoff = (float)iy0 - pad;
-    gl->glyphs[ch].w = (float)sdf_w;
-    gl->glyphs[ch].h = (float)sdf_h;
+    gls->glyphs[ch].x0 = (float)atlas_x / gls->atlas_width;
+    gls->glyphs[ch].y0 = (float)atlas_y / gls->atlas_height;
+    gls->glyphs[ch].x1 = (float)(atlas_x + sdf_w) / gls->atlas_width;
+    gls->glyphs[ch].y1 = (float)(atlas_y + sdf_h) / gls->atlas_height;
+    gls->glyphs[ch].xoff = (float)ix0 - pad;
+    gls->glyphs[ch].yoff = (float)iy0 - pad;
+    gls->glyphs[ch].w = (float)sdf_w;
+    gls->glyphs[ch].h = (float)sdf_h;
 
     int advance, lsb;
     stbtt_GetCodepointHMetrics(&font, ch, &advance, &lsb);
-    gl->glyphs[ch].xadvance = (float)advance * scale;
+    gls->glyphs[ch].xadvance = (float)advance * scale;
 
     if (sdf_h > row_height)
       row_height = sdf_h;
@@ -501,22 +502,22 @@ bool gl_load_font(struct gl_state *gl, const char *font_path, float font_size) {
   }
 
   // Upload atlas to GPU as alpha texture
-  glGenTextures(1, &gl->font_atlas_texture);
-  glBindTexture(GL_TEXTURE_2D, gl->font_atlas_texture);
+  glGenTextures(1, &gls->font_atlas_texture);
+  glBindTexture(GL_TEXTURE_2D, gls->font_atlas_texture);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, gl->atlas_width, gl->atlas_height, 0,
-               GL_ALPHA, GL_UNSIGNED_BYTE, atlas_bitmap);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, gls->atlas_width, gls->atlas_height,
+               0, GL_ALPHA, GL_UNSIGNED_BYTE, atlas_bitmap);
   glBindTexture(GL_TEXTURE_2D, 0);
 
   free(atlas_bitmap);
   free(font_data);
 
-  gl->font_loaded = true;
-  swaylock_log(LOG_DEBUG, "SDF font atlas generated (%dx%d)", gl->atlas_width,
-               gl->atlas_height);
+  gls->font_loaded = true;
+  swaylock_log(LOG_DEBUG, "SDF font atlas generated (%dx%d)", gls->atlas_width,
+               gls->atlas_height);
   return true;
 }
 
@@ -524,11 +525,11 @@ bool gl_load_font(struct gl_state *gl, const char *font_path, float font_size) {
 // Text rendering with elastic kerning
 // ============================================================
 
-static void draw_text(struct gl_state *gl, const char *text, float x, float y,
-                      float extra_spacing, float r, float g, float b, float a,
-                      int viewport_w, int viewport_h, float time,
-                      int anim_mode) {
-  if (!gl->font_loaded || !text || !*text)
+static void draw_text(struct gl_state *gl, struct gl_surface_state *gls,
+                      const char *text, float x, float y, float extra_spacing,
+                      float r, float g, float b, float a, int viewport_w,
+                      int viewport_h, float time, int anim_mode) {
+  if (!gls->font_loaded || !text || !*text)
     return;
 
   glUseProgram(gl->text_program);
@@ -558,7 +559,7 @@ static void draw_text(struct gl_state *gl, const char *text, float x, float y,
   glUniform1i(loc_anim_mode, anim_mode);
 
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, gl->font_atlas_texture);
+  glBindTexture(GL_TEXTURE_2D, gls->font_atlas_texture);
   GLint loc_atlas = glGetUniformLocation(gl->text_program, "u_font_atlas");
   glUniform1i(loc_atlas, 0);
 
@@ -576,15 +577,15 @@ static void draw_text(struct gl_state *gl, const char *text, float x, float y,
     if (ch < 32 || ch >= 127)
       ch = '?';
 
-    float gx = cursor_x + gl->glyphs[ch].xoff;
-    float gy = y + gl->glyphs[ch].yoff;
-    float gw = gl->glyphs[ch].w;
-    float gh = gl->glyphs[ch].h;
+    float gx = cursor_x + gls->glyphs[ch].xoff;
+    float gy = y + gls->glyphs[ch].yoff;
+    float gw = gls->glyphs[ch].w;
+    float gh = gls->glyphs[ch].h;
 
-    float u0 = gl->glyphs[ch].x0;
-    float v0 = gl->glyphs[ch].y0;
-    float u1 = gl->glyphs[ch].x1;
-    float v1 = gl->glyphs[ch].y1;
+    float u0 = gls->glyphs[ch].x0;
+    float v0 = gls->glyphs[ch].y0;
+    float u1 = gls->glyphs[ch].x1;
+    float v1 = gls->glyphs[ch].y1;
 
     float verts[] = {
         gx, gy,      u0, v0, gx + gw, gy,      u1, v0,
@@ -604,7 +605,7 @@ static void draw_text(struct gl_state *gl, const char *text, float x, float y,
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-    cursor_x += gl->glyphs[ch].xadvance + extra_spacing;
+    cursor_x += gls->glyphs[ch].xadvance + extra_spacing;
     char_idx++;
   }
   glDisable(GL_BLEND);
@@ -681,7 +682,7 @@ void gl_render_frame(struct gl_state *gl, struct gl_surface_state *gls,
   for (const char *p = indicator_text; *p; p++) {
     int ch = (unsigned char)*p;
     if (ch >= 32 && ch < 127) {
-      text_width += gl->glyphs[ch].xadvance + extra_spacing;
+      text_width += gls->glyphs[ch].xadvance + extra_spacing;
     }
   }
 
@@ -708,8 +709,8 @@ void gl_render_frame(struct gl_state *gl, struct gl_surface_state *gls,
     ca = 1.0f;
   }
 
-  draw_text(gl, indicator_text, tx, ty, extra_spacing, cr, cg, cb, ca, width,
-            height, (float)time, anim_mode);
+  draw_text(gl, gls, indicator_text, tx, ty, extra_spacing, cr, cg, cb, ca,
+            width, height, (float)time, anim_mode);
 
   eglSwapBuffers(gl->egl_display, gls->egl_surface);
 }
@@ -721,6 +722,8 @@ void gl_render_frame(struct gl_state *gl, struct gl_surface_state *gls,
 void gl_surface_destroy(struct gl_state *gl, struct gl_surface_state *gls) {
   if (gls->bg_texture)
     glDeleteTextures(1, &gls->bg_texture);
+  if (gls->font_atlas_texture)
+    glDeleteTextures(1, &gls->font_atlas_texture);
   if (gls->egl_surface != EGL_NO_SURFACE) {
     eglDestroySurface(gl->egl_display, gls->egl_surface);
   }
@@ -736,8 +739,6 @@ void gl_destroy(struct gl_state *gl) {
     glDeleteProgram(gl->text_program);
   if (gl->quad_vbo)
     glDeleteBuffers(1, &gl->quad_vbo);
-  if (gl->font_atlas_texture)
-    glDeleteTextures(1, &gl->font_atlas_texture);
   if (gl->egl_context != EGL_NO_CONTEXT) {
     eglDestroyContext(gl->egl_display, gl->egl_context);
   }

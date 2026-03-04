@@ -1,65 +1,47 @@
-# swaylock
+# swaylock-88 🚀
 
-swaylock is a screen locking utility for Wayland compositors. It is compatible
-with any Wayland compositor which implements the ext-session-lock-v1 Wayland
-protocol.
+**swaylock-88** is a high-performance, aesthetically-driven screen locking utility for Wayland compositors. 
 
-See the man page, [swaylock(1)](swaylock.1.scd), for instructions on using swaylock.
+Built on a modern **OpenGL (GLES2)** pipeline, it moves away from legacy CPU rendering to provide a fluid, premium experience. The centerpiece of this fork is the **Elastic Typographic UI**—a physics-based approach to password feedback that replaces static indicators with dynamic, responsive typography.
 
-## Release Signatures
+## ✨ Key Features
 
-Releases are signed with [E88F5E48](https://keys.openpgp.org/search?q=34FF9526CFEF0E97A340E2E40FDE7BE0E88F5E48)
-and published [on GitHub](https://github.com/swaywm/swaylock/releases). swaylock
-releases are managed independently of sway releases.
+- **OpenGL GLES2 Renderer**: Fully GPU-accelerated rendering for maximum performance and efficiency.
+- **Elastic Typographic UI**: Spring-physics-based kerning that reacts dynamically to your typing. No more rings, just fluid motion.
+- **Crisp SDF Fonts**: Signed Distance Field font rendering ensures perfectly sharp text at any resolution or scale.
+- **Wayland Native**: Optimized for compositors supporting the `ext-session-lock-v1` protocol.
 
-## Installation
+## 🛠️ Installation
 
-### From Packages
+### Dependencies
 
-Swaylock is available in many distributions. Try installing the "swaylock"
-package for yours.
+To build `swaylock-88`, you'll need the following dependencies:
+
+* **meson** (build system)
+* **wayland** & **wayland-protocols**
+* **wayland-egl**, **egl**, **glesv2** (OpenGL stack)
+* **libxkbcommon**
+* **cairo** (for initial surface setup)
+* **gdk-pixbuf2** (optional: for non-PNG backgrounds)
+* **pam** (optional: for authentication)
+* **scdoc** (optional: for man pages)
 
 ### Compiling from Source
 
-Install dependencies:
+```bash
+meson build
+ninja -C build
+sudo ninja -C build install
+```
 
-* meson \*
-* wayland
-* wayland-protocols \*
-* libxkbcommon
-* cairo
-* gdk-pixbuf2 \*\*
-* pam (optional)
-* [scdoc](https://git.sr.ht/~sircmpwn/scdoc) (optional: man pages) \*
-* git \*
+### 🔐 PAM Configuration
 
-_\* Compile-time dep_  
-_\*\* Optional: required for background images other than PNG_
+On most systems, you'll need a PAM configuration file for swaylock. If you're building from source, ensure you have the PAM development headers installed.
 
-Run these commands:
+## 🚀 Why swaylock-88?
 
-    meson build
-    ninja -C build
-    sudo ninja -C build install
+Traditional lock screens feel static. `swaylock-88` treats the lock screen as an interactive canvas. By leveraging spring physics for character spacing (kerning), every keypress feels tactile and alive. It's not just a security tool; it's a piece of kinetic art for your desktop.
 
-##### Without PAM
+---
 
-On systems without PAM, swaylock uses `shadow.h`.
-
-Systems which rely on a tcb-like setup (either via musl's native support or via
-glibc+[tcb]), require no further action.
-
-[tcb]: https://www.openwall.com/tcb/
-
-For most other systems, where passwords for all users are stored in `/etc/shadow`,
-swaylock needs to be installed suid:
-
-    sudo chmod a+s /usr/local/bin/swaylock
-
-Optionally, on systems where the file `/etc/shadow` is owned by the `shadow`
-group, the binary can be made sgid instead:
-
-    sudo chgrp shadow /usr/local/bin/swaylock
-    sudo chmod g+s /usr/local/bin/swaylock
-
-Swaylock will drop root permissions shortly after startup.
+*Part of the 88-series. Focused on visual excellence and performance.*
