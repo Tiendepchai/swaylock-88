@@ -2,6 +2,7 @@
 #define _SWAYLOCK_H
 #include "background-image.h"
 #include "cairo.h"
+#include "gl_renderer.h"
 #include "pool-buffer.h"
 #include "seat.h"
 #include "wlr-screencopy-unstable-v1-client-protocol.h"
@@ -127,6 +128,9 @@ struct swaylock_state {
 
   struct swaylock_ripple ripples[MAX_RIPPLES];
   uint32_t ripple_idx;
+
+  // OpenGL state (shared)
+  struct gl_state gl;
 };
 
 struct swaylock_surface {
@@ -149,6 +153,7 @@ struct swaylock_surface {
   double indicator_angle;
   double indicator_velocity;
   struct timespec last_anim_update;
+  enum auth_state last_auth_state;
   uint32_t width, height;
   int32_t scale;
   enum wl_output_subpixel subpixel;
@@ -160,6 +165,9 @@ struct swaylock_surface {
   struct zwlr_screencopy_frame_v1 *screencopy_frame;
   struct pool_buffer screencopy_buffer;
   bool screencopy_done;
+
+  // OpenGL per-surface state
+  struct gl_surface_state gl_surface;
 };
 
 // There is exactly one swaylock_image for each -i argument

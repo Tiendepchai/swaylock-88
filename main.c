@@ -110,6 +110,11 @@ static void destroy_surface(struct swaylock_surface *surface) {
   if (surface->surface != NULL) {
     wl_surface_destroy(surface->surface);
   }
+
+  if (surface->state->gl.initialized && surface->gl_surface.egl_window) {
+    gl_surface_destroy(&surface->state->gl, &surface->gl_surface);
+  }
+
   destroy_buffer(&surface->indicator_buffers[0]);
   destroy_buffer(&surface->indicator_buffers[1]);
   wl_output_release(surface->output);
@@ -170,7 +175,21 @@ static void ext_session_lock_surface_v1_handle_configure(
   surface->width = width;
   surface->height = height;
   ext_session_lock_surface_v1_ack_configure(lock_surface, serial);
+
+  // Initialize GL surface if not done yet
+  if (surface->state->gl.initialized && !surface->gl_surface.egl_window) {
+    int bw = surface->width * surface->scale;
+    int bh = surface->height * surface->scale;
+    gl_surface_init(&surface->state->gl, &surface->gl_surface, surface->surface,
+                    bw, bh);
+  } else if (surface->gl_surface.egl_window) {
+    int bw = surface->width * surface->scale;
+    int bh = surface->height * surface->scale;
+    gl_surface_resize(&surface->gl_surface, bw, bh);
+  }
+
   surface->dirty = true;
+  surface->bg_dirty = true;
   render(surface);
 }
 
@@ -395,7 +414,7 @@ static void load_image(char *arg, struct swaylock_state *state) {
     memmove(ptr + 1, ptr, strlen(ptr) + 1);
     *ptr = '\\';
   }
-  if (wordexp(image->path, &p, 0) == 0) {
+  if (wordexp(image->path, &p, WRDE_NOCMD) == 0) {
     free(image->path);
     image->path = join_args(p.we_wordv, p.we_wordc);
     wordfree(&p);
@@ -1060,16 +1079,18 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
       break;
     case LO_INDICATOR_ANIM:
       if (state) {
-        if (strcmp(optarg, "none") == 0)
+        if (strcmp(optarg, "none") == 0 || strcmp(optarg, "0") == 0)
           state->args.indicator_anim = 0;
-        else if (strcmp(optarg, "pulse") == 0)
+        else if (strcmp(optarg, "1") == 0)
           state->args.indicator_anim = 1;
-        else if (strcmp(optarg, "spin") == 0)
+        else if (strcmp(optarg, "2") == 0)
           state->args.indicator_anim = 2;
-        else if (strcmp(optarg, "pulse+spin") == 0)
+        else if (strcmp(optarg, "3") == 0)
           state->args.indicator_anim = 3;
-        else if (strcmp(optarg, "ripple") == 0)
+        else if (strcmp(optarg, "4") == 0)
           state->args.indicator_anim = 4;
+        else if (strcmp(optarg, "5") == 0)
+          state->args.indicator_anim = 5;
         else {
           fprintf(stderr, "Invalid indicator anim: %s\\n", optarg);
           return 1;
@@ -1452,6 +1473,14 @@ int main(int argc, char **argv) {
   state.test_surface = cairo_image_surface_create(CAIRO_FORMAT_RGB24, 1, 1);
   state.test_cairo = cairo_create(state.test_surface);
 
+  // Initialize OpenGL renderer
+  if (!gl_init(&state.gl, state.display)) {
+    swaylock_log(LOG_ERROR,
+                 "Failed to initialize OpenGL, falling back to Cairo");
+  } else {
+    swaylock_log(LOG_DEBUG, "OpenGL renderer ready");
+  }
+
   struct swaylock_surface *surface;
   wl_list_for_each(surface, &state.surfaces, link) { create_surface(surface); }
 
@@ -1514,6 +1543,8 @@ int main(int argc, char **argv) {
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_RESTART;
   sigaction(SIGUSR1, &sa, NULL);
+  sigaction(SIGTERM, &sa, NULL);
+  sigaction(SIGINT, &sa, NULL);
 
   if (state.args.clock || state.args.battery) {
     time_timer_callback(&state);
@@ -1534,5 +1565,15 @@ int main(int argc, char **argv) {
   free(state.args.font);
   cairo_destroy(state.test_cairo);
   cairo_surface_destroy(state.test_surface);
+
+  struct swaylock_surface *tmp;
+  wl_list_for_each_safe(surface, tmp, &state.surfaces, link) {
+    destroy_surface(surface);
+  }
+
+  if (state.gl.initialized) {
+    gl_destroy(&state.gl);
+  }
+
   return 0;
 }

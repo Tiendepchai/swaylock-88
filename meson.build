@@ -30,6 +30,9 @@ endif
 wayland_client = dependency('wayland-client', version: '>=1.20.0')
 wayland_protos = dependency('wayland-protocols', version: '>=1.25', fallback: 'wayland-protocols')
 wayland_scanner = dependency('wayland-scanner', version: '>=1.15.0', native: true)
+wayland_egl = dependency('wayland-egl')
+egl = dependency('egl')
+glesv2 = dependency('glesv2')
 xkbcommon = dependency('xkbcommon')
 cairo = dependency('cairo')
 gdk_pixbuf = dependency('gdk-pixbuf-2.0', required: get_option('gdk-pixbuf'))
@@ -90,6 +93,9 @@ dependencies = [
 	rt,
 	xkbcommon,
 	wayland_client,
+	wayland_egl,
+	egl,
+	glesv2,
 ]
 
 sources = [
@@ -107,6 +113,7 @@ sources = [
 	'unicode.c',
 	'effects.c',
 	'widgets.c',
+	'gl_renderer.c',
 ]
 
 if libpam.found()

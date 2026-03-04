@@ -15,6 +15,16 @@
 #include "swaylock.h"
 #include "unicode.h"
 
+static void kick_springs(struct swaylock_state *state) {
+  struct swaylock_surface *surface;
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  wl_list_for_each(surface, &state->surfaces, link) {
+    surface->last_anim_update = now;
+    surface->dirty = true;
+  }
+}
+
 void clear_buffer(char *buf, size_t size) {
   // Use volatile keyword so so compiler can't optimize this out.
   volatile char *buffer = buf;
@@ -172,6 +182,7 @@ void swaylock_handle_key(struct swaylock_state *state, xkb_keysym_t keysym,
     } else {
       if (backspace(&state->password) && state->password.len != 0) {
         state->input_state = INPUT_STATE_BACKSPACE;
+        kick_springs(state);
         schedule_password_clear(state);
         update_highlight(state);
       } else {
@@ -228,6 +239,7 @@ void swaylock_handle_key(struct swaylock_state *state, xkb_keysym_t keysym,
     if (codepoint) {
       append_ch(&state->password, codepoint);
       state->input_state = INPUT_STATE_LETTER;
+      kick_springs(state);
       schedule_password_clear(state);
       schedule_input_idle(state);
       update_highlight(state);
