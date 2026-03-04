@@ -1326,6 +1326,23 @@ void log_init(int argc, char **argv) {
 
 int main(int argc, char **argv) {
   log_init(argc, argv);
+
+  char lock_path[256];
+  snprintf(lock_path, sizeof(lock_path), "/tmp/swaylock-%u.lock", getuid());
+  int lock_fd = open(lock_path, O_RDWR | O_CREAT, 0600);
+  if (lock_fd >= 0) {
+    struct flock fl;
+    fl.l_type = F_WRLCK;
+    fl.l_whence = SEEK_SET;
+    fl.l_start = 0;
+    fl.l_len = 0;
+    if (fcntl(lock_fd, F_SETLK, &fl) == -1) {
+      swaylock_log(LOG_ERROR,
+                   "Another instance of swaylock is already running.");
+      return 0; // Succeed silently to avoid breaking swayidle
+    }
+  }
+
   initialize_pw_backend(argc, argv);
   srand(time(NULL));
 
